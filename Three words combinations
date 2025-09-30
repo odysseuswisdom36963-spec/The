@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Three-Word Frequency Analyzer</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body {
+      font-family: system-ui,-apple-system,BlinkMacSystemFont,sans-serif;
+      max-width: 1000px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+      line-height: 1.4;
+      background: #f9f9fb;
+      color: #1f2937;
+    }
+    h1 { font-size: 1.75rem; margin-bottom: .5rem; }
+    textarea {
+      width: 100%;
+      min-height: 260px;
+      resize: vertical;
+      padding: .75rem;
+      font-size: 0.9rem;
+      border: 1px solid #d1d5db;
+      border-radius: .5rem;
+      box-sizing: border-box;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    button {
+      background: #2563eb;
+      color: white;
+      border: none;
+      padding: .65rem 1rem;
+      font-size: 1rem;
+      border-radius: .5rem;
+      cursor: pointer;
+      margin-top: .5rem;
+      box-shadow: 0 4px 12px rgba(37,99,235,.2);
+    }
+    button:disabled {
+      opacity: .6;
+      cursor: not-allowed;
+    }
+    .summary {
+      margin: 1rem 0;
+      font-size: .9rem;
+      background: #eef2f7;
+      padding: .75rem 1rem;
+      border-radius: .5rem;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 1rem;
+      font-size: .9rem;
+      background: white;
+      border-radius: .5rem;
+      overflow: hidden;
+      box-shadow: 0 4px 16px rgba(0,0,0,.05);
+    }
+    th, td {
+      padding: .75rem .5rem;
+      text-align: left;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    th {
+      background: #f1f5f9;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    tr:hover {
+      background: #f7f9fc;
+    }
+    .small {
+      font-size: .75rem;
+      color: #555;
+    }
+    .right { text-align: right; }
+    #controls {
+      display: none;
+      margin-top: 1rem;
+      align-items: center;
+      gap: .5rem;
+      flex-wrap: wrap;
+    }
+    #controls label {
+      margin-right: .25rem;
+    }
+    #controls select {
+      padding: .3rem .5rem;
+      border-radius: .3rem;
+      border: 1px solid #cbd5e1;
+    }
+  </style>
+</head>
+<body>
+  <h1>Three-Word Frequency Analyzer</h1>
+  <p>Give me thy text; yea, even many chapters. Press “Go,” and I shall return unto thee the most frequent three-word sequences (trigrams), their counts, and the percentage of all such triples. Thou mayest afterward extract any column.</p>
+  <textarea id="input" placeholder="Paste thy text here..."></textarea>
+  <div>
+    <button id="goBtn">Go</button>
+  </div>
+  <div class="summary" id="summary" style="display:none;"></div>
+  <div id="output"></div>
+
+  <div id="controls">
+    <label for="columnSelect">Extract column:</label>
+    <select id="columnSelect">
+      <option value="0">Triple</option>
+      <option value="1">Count</option>
+      <option value="2">Percentage</option>
+    </select>
+    <button id="extractBtn">Copy to Clipboard</button>
+    <span id="copiedMsg" class="small" style="margin-left:1rem; color:green; display:none;">Copied!</span>
+  </div>
+  
+  <a href="https://translate.google.com/" target="_blank">Go to Google Translate</a>
+  
+<script>
+  // Tokenize on whitespace only, preserve punctuation, strip numbers, normalize Unicode.
+  function extractTokensPreservingPunctuation(text) {
+    const norm = text.normalize('NFC');
+    // Replace various long dashes with space to avoid unintended joining
+    const cleaned = norm.replace(/[\u2014\u2013\u2010\u2011\u2012\u2015]/g, ' ');
+    // Split on whitespace, keeping punctuation attached
+    const rawTokens = cleaned.split(/\s+/).filter(t => t.length > 0);
+    const result = [];
+    for (let tok of rawTokens) {
+      // Remove all numeric characters (any script)
+      tok = tok.replace(/\p{N}+/gu, '');
+      if (!tok) continue;
+      // Include token if it has at least one letter or mark
+      if (/\p{L}|\p{M}/u.test(tok)) {
+        result.push(tok.toLowerCase());
+      }
+    }
+    return result;
+  }
+
+  // Build consecutive three-word sequences (trigrams) from tokens
+  function buildTriples(tokens) {
+    const triples = [];
+    for (let i = 0; i < tokens.length - 2; i++) {
+      triples.push(tokens[i] + ' ' + tokens[i+1] + ' ' + tokens[i+2]);
+    }
+    return triples;
+  }
+
+  function computeFrequencies(items) {
+    const freq = new Map();
+    for (const it of items) {
+      freq.set(it, (freq.get(it) || 0) + 1);
+    }
+    return freq;
+  }
+
+  function buildTable(sortedEntries, totalTriples) {
+    const table = document.createElement('table');
+    const thead = document.createElement('thead');
+    thead.innerHTML = `
+      <tr>
+        <th style="width:50%;">Triple</th>
+        <th class="right">Count</th>
+        <th class="right">Percentage</th>
+      </tr>`;
+    table.appendChild(thead);
+    const tbody = document.createElement('tbody');
+    for (const [triple, count] of sortedEntries) {
+      const tr = document.createElement('tr');
+      const pct = (count / totalTriples) * 100;
+      tr.innerHTML = `
+        <td>${escapeHtml(triple)}</td>
+        <td class="right">${count.toLocaleString()}</td>
+        <td class="right">${pct.toFixed(2)}%</td>
+      `;
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    return table;
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, function(c){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+  }
+
+  document.getElementById('goBtn').addEventListener('click', () => {
+    const btn = document.getElementById('goBtn');
+    btn.disabled = true;
+    const input = document.getElementById('input').value;
+    const output = document.getElementById('output');
+    const summary = document.getElementById('summary');
+    output.innerHTML = '';
+    summary.style.display = 'none';
+    summary.textContent = '';
+    const controls = document.getElementById('controls');
+    if (controls) controls.style.display = 'none';
+    setTimeout(() => {
+      const tokens = extractTokensPreservingPunctuation(input);
+      if (tokens.length < 3) {
+        summary.textContent = "There be insufficient tokens to form three-word combinations.";
+        summary.style.display = 'block';
+        btn.disabled = false;
+        return;
+      }
+      const triples = buildTriples(tokens);
+      const freqMap = computeFrequencies(triples);
+      const totalTriples = triples.length;
+      const sorted = Array.from(freqMap.entries()).sort((a,b) => {
+        if (b[1] !== a[1]) return b[1] - a[1];
+        return a[0] < b[0] ? -1 : 1;
+      });
+      summary.innerHTML = `
+        Total triples: <strong>${totalTriples.toLocaleString()}</strong>. 
+        Unique triples: <strong>${freqMap.size.toLocaleString()}</strong>.
+        Top triple: <strong>${escapeHtml(sorted[0][0])}</strong> appears <strong>${sorted[0][1].toLocaleString()}</strong> times (${((sorted[0][1]/totalTriples)*100).toFixed(2)}%).
+      `;
+      summary.style.display = 'block';
+      const table = buildTable(sorted, totalTriples);
+      output.appendChild(table);
+      if (controls) controls.style.display = 'flex';
+      const copiedMsg = document.getElementById('copiedMsg');
+      if (copiedMsg) copiedMsg.style.display = 'none';
+      btn.disabled = false;
+    }, 50);
+  });
+
+  document.getElementById('extractBtn').addEventListener('click', () => {
+    const colIndex = parseInt(document.getElementById('columnSelect').value, 10);
+    const table = document.querySelector('#output table');
+    if (!table) return;
+    const rows = table.querySelectorAll('tbody tr');
+    const values = Array.from(rows).map(row => row.children[colIndex].textContent.trim());
+    const joined = values.join('\n');
+    navigator.clipboard.writeText(joined).then(() => {
+      const msg = document.getElementById('copiedMsg');
+      if (msg) {
+        msg.style.display = 'inline';
+        setTimeout(() => { msg.style.display = 'none'; }, 2000);
+      }
+    });
+  });
+
+  // Shortcut: Ctrl+Enter triggers
+  document.getElementById('input').addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.key === 'Enter') {
+      document.getElementById('goBtn').click();
+    }
+  });
+</script>
+</body>
+</html>
