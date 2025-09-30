@@ -1,1 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Word Frequency Analyzer</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body {
+      font-family: system-ui,-apple-system,BlinkMacSystemFont,sans-serif;
+      max-width: 1000px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+      line-height: 1.4;
+      background: #f9f9fb;
+      color: #1f2937;
+    }
+    h1 { font-size: 1.75rem; margin-bottom: .5rem; }
+    textarea {
+      width: 100%;
+      min-height: 260px;
+      resize: vertical;
+      padding: .75rem;
+      font-size: 0.9rem;
+      border: 1px solid #d1d5db;
+      border-radius: .5rem;
+      box-sizing: border-box;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    button {
+      background: #2563eb;
+      color: white;
+      border: none;
+      padding: .65rem 1rem;
+      font-size: 1rem;
+      border-radius: .5rem;
+      cursor: pointer;
+      margin-top: .5rem;
+      box-shadow: 0 4px 12px rgba(37,99,235,.2);
+    }
+    button:disabled {
+      opacity: .6;
+      cursor: not-allowed;
+    }
+    .summary {
+      margin: 1rem 0;
+      font-size: .9rem;
+      background: #eef2f7;
+      padding: .75rem 1rem;
+      border-radius: .5rem;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 1rem;
+      font-size: .9rem;
+      background: white;
+      border-radius: .5rem;
+      overflow: hidden;
+      box-shadow: 0 4px 16px rgba(0,0,0,.05);
+    }
+    th, td {
+      padding: .75rem .5rem;
+      text-align: left;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    th {
+      background: #f1f5f9;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    tr:hover {
+      background: #f7f9fc;
+    }
+    .small {
+      font-size: .75rem;
+      color: #555;
+    }
+    .right { text-align: right; }
+    #controls {
+      display: none;
+      margin-top: 1rem;
+      align-items: center;
+      gap: .5rem;
+      flex-wrap: wrap;
+    }
+    #controls label {
+      margin-right: .25rem;
+    }
+    #controls select {
+      padding: .3rem .5rem;
+      border-radius: .3rem;
+      border: 1px solid #cbd5e1;
+    }
+  </style>
+</head>
+<body>
+  <h1>Word Frequency Analyzer</h1>
+  <p>Give me thy text; yea, even many chapters. Press “Go,” and I shall return unto thee the words most used, their counts, and the percentage of the whole. Moreover, thou mayest extract any column for thy further use.</p>
+  <textarea id="input" placeholder="Paste thy text here..."></textarea>
+  <div>
+    <button id="goBtn">Go</button>
+  </div>
+  <div class="summary" id="summary" style="display:none;"></div>
+  <div id="output"></div>
 
+  <div id="controls">
+    <label for="columnSelect">Extract column:</label>
+    <select id="columnSelect">
+      <option value="0">Word</option>
+      <option value="1">Count</option>
+      <option value="2">Percentage</option>
+    </select>
+    <button id="extractBtn">Copy to Clipboard</button>
+    <span id="copiedMsg" class="small" style="margin-left:1rem; color:green; display:none;">Copied!</span>
+  </div>
+  <a href="https://translate.google.com/" target="_blank">Go to Google Translate</a>
+
+  <script>
+    // Utility: normalize and split into words (keeps apostrophes within words, strips other punctuation)
+    function extractWords(text) {
+  // Normalize to composed form for consistency.
+  const norm = text.normalize('NFC');
+
+  // Replace various long dashes with space.
+  const cleaned = norm.replace(/[\u2014\u2013\u2010\u2011\u2012\u2015]/g, ' ');
+
+  // Remove all digits, even those inside words.
+  const noDigits = cleaned.replace(/\p{N}+/gu, '');
+
+  // Match sequences of Unicode letters and marks (excluding numbers), allowing interior connectors.
+  const pattern = /[\p{L}\p{M}]+(?:['’\-][\p{L}\p{M}]+)*/gu;
+  const matches = noDigits.match(pattern);
+  if (!matches) return [];
+
+  // Return lowercased words.
+  return matches.map(w => w.toLowerCase());
+}
+
+    function computeFrequencies(words) {
+      const freq = new Map();
+      for (const w of words) {
+        freq.set(w, (freq.get(w) || 0) + 1);
+      }
+      return freq;
+    }
+
+    function buildTable(sortedEntries, totalWords) {
+      const table = document.createElement('table');
+      const thead = document.createElement('thead');
+      thead.innerHTML = `
+        <tr>
+          <th style="width:40%;">Word</th>
+          <th class="right">Count</th>
+          <th class="right">Percentage</th>
+        </tr>`;
+      table.appendChild(thead);
+      const tbody = document.createElement('tbody');
+      for (const [word, count] of sortedEntries) {
+        const tr = document.createElement('tr');
+        const pct = (count / totalWords) * 100;
+        tr.innerHTML = `
+          <td>${escapeHtml(word)}</td>
+          <td class="right">${count.toLocaleString()}</td>
+          <td class="right">${pct.toFixed(2)}%</td>
+        `;
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      return table;
+    }
+
+    function escapeHtml(s) {
+      return s.replace(/[&<>"']/g, function(c){
+        return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+      });
+    }
+
+    document.getElementById('goBtn').addEventListener('click', () => {
+      const btn = document.getElementById('goBtn');
+      btn.disabled = true;
+      const input = document.getElementById('input').value;
+      const output = document.getElementById('output');
+      const summary = document.getElementById('summary');
+      output.innerHTML = '';
+      summary.style.display = 'none';
+      summary.textContent = '';
+      document.getElementById('controls').style.display = 'none';
+      setTimeout(() => {
+        const words = extractWords(input);
+        if (words.length === 0) {
+          summary.textContent = "There be no words found in thy input.";
+          summary.style.display = 'block';
+          btn.disabled = false;
+          return;
+        }
+        const freqMap = computeFrequencies(words);
+        const total = words.length;
+        const sorted = Array.from(freqMap.entries()).sort((a,b) => {
+          if (b[1] !== a[1]) return b[1] - a[1];
+          return a[0] < b[0] ? -1 : 1;
+        });
+        summary.innerHTML = `
+          Total words: <strong>${total.toLocaleString()}</strong>. 
+          Unique words: <strong>${freqMap.size.toLocaleString()}</strong>.
+          Top word: <strong>${escapeHtml(sorted[0][0])}</strong> appears <strong>${sorted[0][1].toLocaleString()}</strong> times (${((sorted[0][1]/total)*100).toFixed(2)}%).
+        `;
+        summary.style.display = 'block';
+        const table = buildTable(sorted, total);
+        output.appendChild(table);
+        document.getElementById('controls').style.display = 'flex';
+        document.getElementById('copiedMsg').style.display = 'none';
+        btn.disabled = false;
+      }, 50);
+    });
+
+    document.getElementById('extractBtn').addEventListener('click', () => {
+      const colIndex = parseInt(document.getElementById('columnSelect').value, 10);
+      const table = document.querySelector('#output table');
+      if (!table) return;
+      const rows = table.querySelectorAll('tbody tr');
+      const values = Array.from(rows).map(row => {
+        return row.children[colIndex].textContent.trim();
+      });
+      const joined = values.join('\n');
+      navigator.clipboard.writeText(joined).then(() => {
+        const msg = document.getElementById('copiedMsg');
+        msg.style.display = 'inline';
+        setTimeout(() => { msg.style.display = 'none'; }, 2000);
+      });
+    });
+
+    // Ctrl+Enter shortcut
+    document.getElementById('input').addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.key === 'Enter') {
+        document.getElementById('goBtn').click();
+      }
+    });
+  </script>
+</body>
+</html>
